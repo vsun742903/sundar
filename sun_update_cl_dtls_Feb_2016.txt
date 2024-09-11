@@ -1,0 +1,358 @@
+USE [DHRM_PRD_DB_BKP]
+GO
+/****** Object:  UserDefinedFunction [dbo].[update_cl_dtls_Feb_2016]    Script Date: 11-09-2022 04:01:12 PM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER function [dbo].[update_cl_dtls_Feb_2016](@stdt date,@plant_id int)
+returns table as
+return
+(
+select tbl1.plant_id,tbl1.cemp_id,tbl1.in_time,tbl1.out_time,
+	   tbl1.expected_from,tbl1.expected_to,	 
+	tbl1.worked_hour as w,w_hr,
+	case when(tbl1.early_going+ case when(tbl1.late_comeing)>0 then tbl1.late_comeing else 0 end)<=15
+	then
+	1
+	else
+		case when(tbl1.early_going+ case when( tbl1.late_comeing)>0 then tbl1.late_comeing else 0 end)<=60
+		then
+			case when (w_hr=8) 
+			then 0.875
+			else 				
+				case when w_hr=8.5 then  0.882
+				else
+					case when w_hr=12 then 0.917 
+					else
+						case when  w_hr=9 then 0.888
+						else
+							case when w_hr=9.5 then 0.894
+							else
+								case when w_hr=7 then 0.857									
+								else
+									case when w_hr=8.25 then 0.879
+									else
+										case when w_hr=8.75 then 0.886
+										when w_hr=7.75 then 0.877
+										else
+										0
+										end
+									end
+								end								
+							end
+						end
+					end
+				end				
+			end
+		else
+			case when(tbl1.early_going+ case when( tbl1.late_comeing)>0 then tbl1.late_comeing else 0 end)<=120
+			then
+				---- MORETHAN 90 MIN
+					case when (w_hr=8) 
+					then 0.750
+					else 
+						case when w_hr=8.5 then  0.764
+						else
+							case when w_hr=12 then 0.833
+							else
+								case when  w_hr=9 then 0.777
+								else
+									case when w_hr=9.5 then 0.789
+									else
+										case when w_hr=7 then 0.714								
+										else
+											case when w_hr=8.25 then 0.759
+											when w_hr=8.75 then 0.772
+											when w_hr=7.75 then 0.748
+											else
+											0											
+											end
+										end	
+									end
+								end
+							end
+						end
+					end
+				---------------
+			else
+				case when  (tbl1.worked_hour)>= case when(tbl1.w_hr)>=12 then 6 else case when(tbl1.w_hr)>=9.5 THEN 4.5 ELSE 4 END end
+				then
+				0.5
+				else
+				0
+				end
+			end
+		end		
+	end as worked_hour
+	  ,tbl1.early_going,
+	   case when( tbl1.late_comeing)>0
+	   then
+	   tbl1.late_comeing
+	   else
+	   0
+	   end as late_comeing
+	   ,tbl1.over_time,(tbl1.over_time/60)as ot_hr,
+	   tbl1.shift,tbl1.shift_id,tbl1.att_date,act_tm_from,act_tm_to
+from
+(
+select plant_id,--d.Dept_id,
+cemp_id,in_time,out_time,
+expected_from,
+expected_to,
+case when (in_time is not null and  out_time is not null)
+then ---- chk working hour by taking min in [out time ,expected_to] as out time
+	case when((convert(datetime,out_dt)
+	+convert(datetime,out_time,108)
+	) < 
+	(convert(datetime, 
+	(case when expected_from<expected_to then 
+	att_date 
+	else 
+	out_dt end))
+	+convert(datetime,expected_to,108)
+	)
+	)
+	then
+		 ---- chk working hour by taking max in [in time ,expected_from] as in time
+		case when ((convert(datetime,in_time)+convert(datetime,att_date,108)
+		)<(convert(datetime,expected_from)+convert(datetime,att_date,108)
+		))
+		then
+			((datediff(mi, (convert(datetime,in_time)+convert(datetime,att_date,108)
+			),(convert(datetime,out_dt)+convert(datetime,out_time,108)
+			)))  / 60.0)  
+		else
+			((datediff(mi, (convert(datetime,expected_from)+convert(datetime,att_date,108)
+			),(convert(datetime,out_dt)+convert(datetime,out_time,108)
+			)))  / 60.0)  
+		end
+		
+	else
+		---- chk working hour by taking max in [in time ,expected_from] as in time
+		case when ((convert(datetime,in_time)+convert(datetime,att_date,108)
+		)< (convert(datetime,
+															case when expected_from<expected_to
+															then att_date else out_dt end)+convert(datetime,expected_to,108)
+															))
+		then
+			((datediff(mi, (convert(datetime,in_time)+convert(datetime,att_date,108)
+			), (convert(datetime,
+																	case when expected_from<expected_to
+																	then att_date else out_dt end)+convert(datetime,expected_to,108)
+																	) ))  / 60.0)
+		else
+			((datediff(mi, (convert(datetime,expected_from)+convert(datetime,att_date,108)
+			),(convert(datetime,
+																			case when expected_from<expected_to
+																			then att_date else out_dt end)+convert(datetime,expected_to,108)
+																			) ))  / 60.0)  
+		end
+		
+	end	
+else
+0.0
+end as worked_hour,
+
+case when(out_dt=att_date)
+then
+	case when(out_time<expected_to)
+	then
+		datediff(mi, out_time,expected_to)
+	else
+		CASE WHEN (expected_from>expected_to)
+		THEN
+			case when (shift_id<>79 and shift_id<>20) then
+				datediff(mi,(convert(datetime,out_dt)+convert(datetime,out_time,108)
+				)
+				,(DATEADD(DAY,1,convert(datetime,out_dt))+convert(datetime,expected_to,108)
+				))						
+			else
+				case when datediff(mi, out_time,expected_to)>0
+				then
+					datediff(mi, out_time,expected_to)
+				else
+				0
+				end				
+			end			
+		ELSE
+			0
+		END
+	end  
+else
+	case when out_time IS not null
+	then
+		case when ((convert(datetime,out_dt)+convert(datetime,out_time,108)
+		)<convert(datetime, 
+													 case when (expected_from<expected_to) then att_date else out_dt end)+convert(datetime,expected_to,108)
+													 )
+		then										
+			datediff(mi, (convert(datetime,out_dt)+convert(datetime,out_time,108)
+			),convert(datetime, 
+													 case when (expected_from<expected_to) then att_date else out_dt end)+convert(datetime,expected_to,108)
+													 )
+		else
+			0
+		end
+	else
+	0
+	end
+end
+as early_going,
+
+datediff(mi, expected_from,in_time) as late_comeing,
+case when (out_dt = att_date)
+then
+	case when(out_time>expected_to)
+	then
+	datediff(mi,expected_to,out_time)
+	else
+	0
+	end
+else
+	datediff(mi,(convert(datetime,case when (expected_from<expected_to) then att_date else out_dt end )+convert(datetime,expected_to,108)
+	),(convert(datetime,out_dt)+convert(datetime,out_time,108)
+	))	
+end
+as over_time,
+
+shift,shift_id,att_date,w_hr,act_tm_from,act_tm_to
+from
+(
+select a.* ,e.act_tm_from, e.act_tm_to,--b.dept_id,
+case when manual_shift='N'
+then
+	case when e.shift_id is null
+	then
+		/*case when 1=1 --d.is_security='Y'
+		then
+		(select top 1 act_tm_to from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max  and security_shift='Y' and type='R' and plant_id=@plant_id)   --shift_id>6 and type='R') 
+		else
+		(select top 1 act_tm_to from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='N' and type='R' and plant_id=@plant_id) -- shift_id<=6 and type='R') 
+		end*/ --commented by sundar 
+		null
+	else
+		(select top 1 act_tm_to from mst_shift_rules z where shift_id=e.shift_id and plant_id=@plant_id) 
+	end
+else
+	(select top 1 act_tm_to from mst_shift_rules z where shift_id=a.att_shift and plant_id=@plant_id) 
+end
+ as expected_to,
+
+case when manual_shift='N'
+then
+	case when e.shift_id is null
+	then
+		/*case when 1=1 --d.is_security='Y'
+		then
+		(select top 1 act_tm_from from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='Y' and type='R' and plant_id=@plant_id) --and shift_id>6 and type='R')
+		else
+		(select top 1 act_tm_from from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='N' and type='R' and plant_id=@plant_id) --and shift_id<=6 and type='R') 
+		end */ --commented by sundar
+		null
+	else
+		(select top 1 act_tm_from from mst_shift_rules z where shift_id=e.shift_id and plant_id=@plant_id)
+	end
+else
+	(select top 1 act_tm_from from mst_shift_rules z where shift_id=a.att_shift and plant_id=@plant_id)
+end as expected_from,
+case when manual_shift='N'
+then
+	case when e.shift_id is null
+	then
+		/*case when 1=1 --d.is_security='Y'
+		then
+		(select top 1 shift_id from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='Y' and type='R' and plant_id=@plant_id) --and shift_id>6 and type='R')
+		else
+		(select top 1 shift_id from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='N' and type='R' and plant_id=@plant_id) --and shift_id<=6 and type='R')
+		end*/
+		null
+	else
+		e.shift_id
+	end
+else
+	a.att_shift
+end as shift_id,
+case when manual_shift='N'
+then
+	case when e.shift_id is null
+	then
+		/*case when 1=1 --d.is_security='Y'
+		then
+		(select top 1 shift_desc from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='Y' and type='R' and plant_id=@plant_id) --and shift_id>6 and type='R')
+		else
+		(select top 1 shift_desc from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='N' and type='R' and plant_id=@plant_id) -- and shift_id<=6 and type='R')
+		end*/  --commented by sundar
+		null
+	else
+		(select top 1 shift_desc from mst_shift_rules z where shift_id= e.shift_id )
+	end
+else
+	(select top 1 shift_desc from mst_shift_rules z where shift_id=a.att_shift)
+end as shift,
+
+case when manual_shift='N'
+then
+	case when e.shift_id is null
+	then
+		/*case when 1=1 --d.is_security='Y' 
+		then
+			(select top 1 
+			case when act_tm_from<act_tm_to then
+			DATEDIFF(mi,act_tm_from,act_tm_to) /60.0
+			else
+			DATEDIFF(mi,convert(datetime,act_tm_from),dateadd(day,1,convert(datetime,act_tm_to)))/60.0 
+			end
+			from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='Y' and type='R' and plant_id=@plant_id) --and shift_id>6 and type='R')
+		else
+			(select top 1 
+				case when act_tm_from<act_tm_to then
+					DATEDIFF(mi,act_tm_from,act_tm_to)/60.0 
+				else
+					DATEDIFF(mi,convert(datetime,act_tm_from),dateadd(day,1,convert(datetime,act_tm_to)))/60.0 
+				end
+				from mst_shift_rules z where a.in_time between z.in_tm_min and z.in_tm_max and security_shift='N' and type='R' and plant_id=@plant_id) -- and shift_id<=6 and type='R')
+		end */ --commented by sundar
+		null
+	else
+		(select top 1 
+			case when act_tm_from<act_tm_to then
+			DATEDIFF(mi,act_tm_from,act_tm_to) /60.0
+			else
+			DATEDIFF(mi,convert(datetime,act_tm_from),dateadd(day,1,convert(datetime,act_tm_to)))/60.0 
+			end
+			from mst_shift_rules z where  shift_id=e.shift_id)
+	end
+else
+	/*case when 1=1 --d.is_security='Y' 
+	then
+	(select top 1 
+	case when act_tm_from<act_tm_to then
+	DATEDIFF(mi,act_tm_from,act_tm_to) /60.0
+	else
+	DATEDIFF(mi,convert(datetime,act_tm_from),dateadd(day,1,convert(datetime,act_tm_to))) /60.0
+	end
+	from mst_shift_rules z where shift_id=a.att_shift)
+	else
+	(select top 1 DATEDIFF(mi,act_tm_from,act_tm_to) /60.0
+		from mst_shift_rules z where shift_id=a.att_shift)
+	end*/
+	null
+end as w_hr
+from
+trn_cont_emp_attdtls a ,--trn_cont_emp_attdtls a, 
+trainee_apln b 
+left join
+mst_defaultshift e 
+on b.plant_code=e.plant_code
+where 
+A.cemp_id=b.apln_slno  AND
+in_time is not null 
+and out_time is not null
+and att_date >=@stdt -- between dateadd(day,-1,GETDATE()) and GETDATE() 
+and b.plant_code=a.plant_id
+)as t1
+where shift_id is  not null
+)as tbl1
+);
